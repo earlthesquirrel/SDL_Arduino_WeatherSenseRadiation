@@ -29,7 +29,7 @@
 
 #define LED 13
 // Software version
-#define SOFTWAREVERSION 4
+#define SOFTWAREVERSION 5
 
 // unique ID of this WeatherSenseRadiation system - change if you have multiple WeatherSenseRadiation systems
 #define WEATHERSENESTHBID 1
@@ -465,7 +465,7 @@ void setup()
   wakeCount = 0;
 
   AuxA = 0x00;
- 
+
   Serial.println();
   Serial.println();
   Serial.println(F(">>>>>>>>>><<<<<<<<<"));
@@ -608,6 +608,18 @@ void setup()
   //attachInterrupt(digitalPinToInterrupt(INT2_PIN), &RadiationHandler, CHANGE);
   geiger.start();
 
+  Serial.println(" ---- 30 second warmup ----");
+  // delay 30 seconds after startup
+  delay(10000);
+  // Pat the WatchDog
+  ResetWatchdog();
+  delay(10000);
+  // Pat the WatchDog
+  ResetWatchdog();
+  delay(10000);
+  // Pat the WatchDog
+  ResetWatchdog();
+  
   Serial.println(F("\nReady for Radiation!"));
 
 
@@ -679,7 +691,7 @@ void loop()
 
     if (((wakeCount % WAKEUPS) == 0))
     {
-    
+
       // Pat the WatchDog
       ResetWatchdog();
       readyToTransmit = true;
@@ -706,7 +718,7 @@ void loop()
 
       Serial.print("CPM Count = ");
       Serial.println(CPM);
-      
+
 
 
     }
@@ -739,8 +751,8 @@ void loop()
     }
 
     /*
-    else
-    {
+      else
+      {
       // send the I'm Alive Message
 
       AuxA = AuxA | 0x08;  // bit on
@@ -750,9 +762,9 @@ void loop()
       AuxA = AuxA & 0xF7;  // bit off
 
 
-    }
+      }
 
-   */
+    */
   }
 
 
@@ -813,7 +825,7 @@ void loop()
 
 
 
-
+                                                                                                                                                                                                                                                                        
   // Pat the WatchDog
   ResetWatchdog();
 
