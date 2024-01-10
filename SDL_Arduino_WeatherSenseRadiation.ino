@@ -12,13 +12,11 @@
 // WeatherSenseProtocol of 8 is SolarMAX LiPo   BatV < 7V
 // WeatherSenseProtocol of 10 is SolarMAX LeadAcid   BatV > 7V LoRa version
 // WeatherSenseProtocol of 11 is SolarMAX4 LeadAcid BatV > 7V
+// WeatherSenseProtocol of 15 is WeatherSense AQI 433MHz
 // WeatherSenseProtocol of 16 is WeatherSense ThunderBoard 433MHz
-// WeatherSenseProtocol of 17 is Generic data
-// WeatherSenseProtocol of 18 is WeatherSense AfterShock
 // WeatherSenseProtocol of 19 is WeatherSense Radiation
-
 #define WEATHERSENSEPROTOCOL 19
-#define LED 13
+
 // Software version
 #define SOFTWAREVERSION 5
 
@@ -26,6 +24,8 @@
 #define WEATHERSENESTHBID 1
 // Which WeatherSense TRadiation Protocol Version
 #define WEATHERSENSEPROTOCOLVERSION 1
+
+#define LED 13
 
 // Device ID is changed if you have more than one WeatherSense Radiation Monitor in the area
 // Number of milliseconds between wake up  30 seconds.   - if you move this over 60000 ms,
@@ -45,14 +45,6 @@ ISR(WDT_vect) {
 #include <RH_ASK.h>
 #include <avr/sleep.h>
 #include <avr/power.h>
-#include "SDL_Arduino_INA3221.h"
-
-SDL_Arduino_INA3221 INA3221;
-
-// the three channels of the INA3221 named for INA3221 Solar Power Controller channels (www.switchdoc.com)
-#define LIPO_BATTERY_CHANNEL 1
-#define SOLAR_CELL_CHANNEL 2
-#define OUTPUT_CHANNEL 3
 
 // Other Pins
 #define WATCHDOG_1 5
@@ -60,14 +52,12 @@ SDL_Arduino_INA3221 INA3221;
 #define RXPIN 9
 #define INT1_PIN 2  //Arduino pin connected to the INT1 pin of the D7S sensor
 
-
-// Number of milliseconds between data outputs
-
 // Radiation Outputs
 volatile long CPM = 0;
 volatile long nSVh = 0;
 volatile float uSVh = 0.0;
 
+// Radio Head driver set up -- for 433Mhz communication.
 RH_ASK driver(2000, RXPIN, TXPIN);
 
 unsigned long MessageCount = 0;
@@ -87,21 +77,12 @@ typedef enum {
 } wakestate;
 
 
-// Device Present State Variables
-bool INA3221_Present;
-bool Radiation_Present;
 byte byteBuffer[100];  // contains string to be sent to RX unit
 
 // State Variables
 long TimeStamp;
 
 // State Status
-float BatteryVoltage;
-float BatteryCurrent;
-float LoadVoltage;
-float LoadCurrent;
-float SolarPanelVoltage;
-float SolarPanelCurrent;
 byte AuxA;
 byte SoftwareVersion;
 
@@ -110,8 +91,8 @@ byte SoftwareVersion;
 // 0000DCBA
 
 // A = 1, Radiation Present, 0 not present
-// B = 1, IN3221 (Solar) Present, 0 not present
-// C = 1, Low battery, Chip shut off (too many false alarms in low voltage mode)
+// B = 0, IN3221 (Solar) Not Present
+// C = 0, Was for low battery
 // D = 1, I'm alive message
 
 wakestate wakeState;  // who woke us up?
@@ -145,8 +126,6 @@ int convert4ByteFloatVariables(int bufferCount, float myVariable) {
 
   for (i = 0; i < 4; i++) {
     byteBuffer[bufferCount] = thing.bytes[i];
-
-
     bufferCount++;
   }
 
@@ -185,10 +164,10 @@ int checkSum(int bufferCount)
   unsigned short checksumValue;
   // calculate checksum
   checksumValue = crc.XModemCrc(byteBuffer, 0, 59);
-#if defined(TXDEBUG)
-  Serial.print(F("crc = 0x"));
-  Serial.println(checksumValue, HEX);
-#endif
+//#if defined(TXDEBUG)
+//  Serial.print(F("crc = 0x"));
+//  Serial.println(checksumValue, HEX);
+//#endif
 
   byteBuffer[bufferCount] = checksumValue >> 8;
   bufferCount++;
@@ -204,27 +183,25 @@ int buildProtocolMessage()
   int bufferCount = 0;
   bufferCount = convert4ByteLongVariables(bufferCount, MessageCount);
 
-  byteBuffer[bufferCount] = WEATHERSENESTHBID;  // WeatherSenseRadiation unique ID
-  bufferCount++;
-  byteBuffer[bufferCount] = WEATHERSENSEPROTOCOL;  // Type of WeatherSense System
-  bufferCount++;
-  byteBuffer[bufferCount] = WEATHERSENSEPROTOCOLVERSION;  // WeatherSense Radiation protocol version
-  bufferCount++;
+  byteBuffer[bufferCount++] = WEATHERSENESTHBID;  // WeatherSenseRadiation unique ID
+  byteBuffer[bufferCount++] = WEATHERSENSEPROTOCOL;  // Type of WeatherSense System
+  byteBuffer[bufferCount++] = WEATHERSENSEPROTOCOLVERSION;  // WeatherSense Radiation protocol version
 
   bufferCount = convert4ByteLongVariables(bufferCount, CPM);
   bufferCount = convert4ByteLongVariables(bufferCount, nSVh);
   bufferCount = convert4ByteFloatVariables(bufferCount, uSVh);
-  bufferCount = convert4ByteFloatVariables(bufferCount, LoadVoltage);  // Solar Data
-  bufferCount = convert4ByteFloatVariables(bufferCount, BatteryVoltage);
-  bufferCount = convert4ByteFloatVariables(bufferCount, BatteryCurrent);
-  bufferCount = convert4ByteFloatVariables(bufferCount, LoadCurrent);
-  bufferCount = convert4ByteFloatVariables(bufferCount, SolarPanelVoltage);
-  bufferCount = convert4ByteFloatVariables(bufferCount, SolarPanelCurrent);
 
-  byteBuffer[bufferCount] = AuxA;  // Aux
-  bufferCount++;
-  byteBuffer[bufferCount] = SOFTWAREVERSION;
-  bufferCount++;
+  // Since we're running on wall power, we no longer need to provide Solar and Battery data.  
+  // So we'll send 0's
+  bufferCount = convert4ByteFloatVariables(bufferCount, 0);  
+  bufferCount = convert4ByteFloatVariables(bufferCount, 0);
+  bufferCount = convert4ByteFloatVariables(bufferCount, 0);
+  bufferCount = convert4ByteFloatVariables(bufferCount, 0);
+  bufferCount = convert4ByteFloatVariables(bufferCount, 0);
+  bufferCount = convert4ByteFloatVariables(bufferCount, 0);
+
+  byteBuffer[bufferCount++] = AuxA;  // Aux
+  byteBuffer[bufferCount++] = SOFTWAREVERSION;
 
   return bufferCount;
 }
@@ -246,7 +223,6 @@ void ResetWatchdog()
   digitalWrite(WATCHDOG_1, LOW);
   delay(200);
   digitalWrite(WATCHDOG_1, HIGH);
-  //Serial.println(F("Watchdog1 Reset - Patted the Dog"));
 }
 
 DFRobot_Geiger geiger(INT1_PIN);
@@ -262,30 +238,14 @@ void sendMessage()
   Serial.println(MessageCount);
   Serial.print(F(" STATUS - WeatherSenseProtocol:"));
   Serial.println(WEATHERSENSEPROTOCOL);
-  Serial.print(F(" WakeState="));
-  Serial.println(wakeState);
-  Serial.print(F(" wakeCount="));
+  Serial.print(F(" WakeCount="));
   Serial.println(wakeCount);
-  Serial.print(F("CPM Count: "));
+  Serial.print(F(" CPM Count: "));
   Serial.println(CPM);
-  Serial.print(F(" Battery Voltage:  "));
-  Serial.print(BatteryVoltage);
-  Serial.println(F(" V"));
-  Serial.print(F(" Battery Current:       "));
-  Serial.print(BatteryCurrent);
-  Serial.println(F(" mA"));
-  Serial.print(F(" Solar Panel Voltage:   "));
-  Serial.print(SolarPanelVoltage);
-  Serial.println(F(" V"));
-  Serial.print(F(" Solar Current:  "));
-  Serial.print(SolarPanelCurrent);
-  Serial.println(F(" mA"));
-  Serial.print(F(" Load Voltage:  "));
-  Serial.print(LoadVoltage);
-  Serial.println(F(" V"));
-  Serial.print(F(" Load Current:       "));
-  Serial.print(LoadCurrent);
-  Serial.println(" mA");
+  Serial.print(F(" nSVh Value: "));
+  Serial.println(nSVh);
+  Serial.print(F(" uSVh Value: "));
+  Serial.println(uSVh);
   Serial.print(F(" Currentmillis() = "));
   Serial.println(millis());
   Serial.print(F("  AuxA State:"));
@@ -296,10 +256,8 @@ void sendMessage()
   Serial.println(F("###############"));
 #endif
   // write out the current protocol to message and send.
-  int bufferLength;
-
   Serial.println(F("----------Sending packets----------"));
-  bufferLength = buildProtocolMessage();
+  int bufferLength = buildProtocolMessage();
 
   // Send a message
   Serial.print(F("bufferlength="));
@@ -308,14 +266,14 @@ void sendMessage()
 
   if (!driver.waitPacketSent(6000))
   {
-    //Serial.println(F("Timeout on transmission"));
+    Serial.println(F("Timeout on transmission"));
     // re-initialize board
     if (!driver.init()) {
-      //Serial.println(F("init failed"));
+      Serial.println(F("init failed"));
       while (1)
         ;
     }
-    //Serial.println(F("----------Board Reinitialized----------"));
+    Serial.println(F("----------Board Reinitialized----------"));
   }
 
   Serial.println(F("----------After Sending packet----------"));
@@ -328,7 +286,7 @@ void sendMessage()
     }
     Serial.print(byteBuffer[i], HEX);  //  write buffer to hardware serial port
   }
-  
+
   Serial.println();
   Serial.println(F("----------After Wait Sending packet----------"));
   delay(100);
@@ -341,6 +299,7 @@ void sendMessage()
 }
 
 
+
 void setup()
 {
   Serial.begin(115200);  // TXDEBUGging only
@@ -350,8 +309,6 @@ void setup()
 
   AuxA = 0x00;
 
-  Serial.println();
-  Serial.println();
   Serial.println(F(">>>>>>>>>><<<<<<<<<"));
   Serial.println(F("WeatherSense Radiation"));
   Serial.println(F(">>>>>>>>>><<<<<<<<<"));
@@ -399,65 +356,20 @@ void setup()
   wakeState = REBOOT;
   nextSleepLength = SLEEPCYCLE;
   TimeStamp = 0;
-  BatteryVoltage = 0.0;
-  BatteryCurrent = 0.0;
-  LoadCurrent = 0.0;
-  SolarPanelVoltage = 0.0;
-  SolarPanelCurrent = 0.0;
 
   pinMode(WATCHDOG_1, OUTPUT);
   digitalWrite(WATCHDOG_1, HIGH);
   Wire.begin();
 
-  // test for INA3221_Present
-  INA3221_Present = false;
-
-  int MIDNumber;
-  INA3221.wireReadRegister(0xFE, &MIDNumber);
-  Serial.print(F("Manuf ID:   0x"));
-  Serial.print(MIDNumber, HEX);
-  Serial.println();
-
-  if (MIDNumber != 0x5449) 
-  {
-    INA3221_Present = false;
-    Serial.println(F("INA3221 Not Present"));
-  } 
-  else 
-  {
-    INA3221_Present = true;
-    Serial.println("SunAirPlus3 Found");
-
-    // State Variable
-    AuxA = AuxA | 0X02;
-  }
-
-  int error;
-
-  Radiation_Present = true;
-  error = 0;
-
-  if (error == 0) 
-  {
-    Serial.println("Radiation device found");
-    Radiation_Present = true;
-    // State Variable
-    AuxA = AuxA | 0X01;
-  } 
-  else if (error == 4) 
-  {
-    Serial.println("Radiation device Not Found");
-    Radiation_Present = false;
-  }
-  //start D7S connection
-
+  // Set State Variable to indicate Geiger Counter present.
+  // Haven't found code that could be used to actually check this,
+  // DFRobot nor SDL code has a real check.
+  AuxA = AuxA | 0X01;
+  
   //--- INTERRUPT SETTINGS ---
   pinMode(INT1_PIN, INPUT);
   digitalWrite(INT1_PIN, HIGH);
 
-  //EIFR |= bit(INTF1); // clear INT1 interrupt flag
-
-  //attachInterrupt(digitalPinToInterrupt(INT2_PIN), &RadiationHandler, CHANGE);
   geiger.start();
 
   Serial.println(" ---- 30 second warmup ----");
@@ -478,36 +390,15 @@ void setup()
 
 void loop() 
 {
-  // Only send if source is SLEEP_INTERRUPT
-#if defined(TXDEBUG)
-  Serial.print(F("wakeState="));
-  Serial.println(wakeState);
-#endif
 
   if ((wakeState == SLEEP_INTERRUPT) || (wakeState == REBOOT))
   {
     wakeState = NO_INTERRUPT;
     TimeStamp = millis();
 
-    // if INA3221 present, read charge data
-    if (INA3221_Present) 
-    {
-      BatteryVoltage = INA3221.getBusVoltage_V(LIPO_BATTERY_CHANNEL);
-      BatteryCurrent = INA3221.getCurrent_mA(LIPO_BATTERY_CHANNEL);
-      SolarPanelVoltage = INA3221.getBusVoltage_V(SOLAR_CELL_CHANNEL);
-      SolarPanelCurrent = -INA3221.getCurrent_mA(SOLAR_CELL_CHANNEL);
-      LoadVoltage = INA3221.getBusVoltage_V(OUTPUT_CHANNEL);
-      LoadCurrent = INA3221.getCurrent_mA(OUTPUT_CHANNEL) * 0.75;
-    }
-
-    //if (BatteryVoltage < 2.80)
-    //  AuxA = AuxA | 0x04;
-    //else
-      AuxA = AuxA & 0xFB;
-
     bool readyToTransmit = false;
 
-    // check if it is time to send message (every 10 minutes or on interrupt) - 30 seconds pre check
+    // check if it is time to send message  - 30 seconds pre check
 
     if (((wakeCount % WAKEUPS) == 0))
     {
@@ -515,59 +406,25 @@ void loop()
       ResetWatchdog();
       readyToTransmit = true;
 
-      Serial.println(" ---- 3 second warmup ----");
-
-      //EIFR |= bit(INTF1); // clear INT1 interrupt flag
-      //attachInterrupt(digitalPinToInterrupt(INT2_PIN), &RadiationHandler, CHANGE);
-      // doing CPM count
-      //detachInterrupt(digitalPinToInterrupt(INT2_PIN));
-
+      Serial.println(F(" ---- 3 second warmup ----"));
       delay(3000);
-      Serial.println("Starting Geiger Read");
+      Serial.println(F("Starting Geiger Read"));
 
       CPM = geiger.getCPM();
       nSVh = geiger.getnSvh();
       uSVh = geiger.getuSvh();
 
-      Serial.print("CPM Count = ");
-      Serial.println(CPM);
     }
 
     Serial.println();
 
     if (readyToTransmit)  // ready to transmit
     {
-      // transmit
-      if ((AuxA & 0x04) == false)  // If the battery vboltage is less than 2.80V, then Radiation is flaky
-      {
         // Now send the message
         Serial.println(F(">>>>>>>>>>>>>>>Transmitting radiation message<<<<<<<<<<<<"));
         sendMessage();
         Serial.println(F("----------Packet Sent.  Sleeping Now----------"));
-      } 
-      else 
-      {
-        Serial.println(F("Battery Voltage Low"));
-        Serial.print(F("AuxA = "));
-        Serial.println(AuxA, HEX);
-      }
-    }
-
-    /*
-      else
-      {
-      // send the I'm Alive Message
-
-      AuxA = AuxA | 0x08;  // bit on
-
-      Serial.println(F(">>>>>>>>>>>>>>>Transmitting Alive message<<<<<<<<<<<<"));
-
-      AuxA = AuxA & 0xF7;  // bit off
-
-
-      }
-
-    */
+    } 
   }
 
   // Pat the WatchDog
@@ -579,10 +436,6 @@ void loop()
   long timeBefore;
   long timeAfter;
   timeBefore = millis();
-#if defined(TXDEBUG)
-  Serial.print(F("timeBeforeSleep="));
-  Serial.println(timeBefore);
-#endif
   delay(100);
 
   //Sleepy::loseSomeTime(nextSleepLength);
@@ -594,24 +447,37 @@ void loop()
   wakeCount++;
 
 #if defined(TXDEBUG)
-  Serial.print(F("Awake now: "));
+  Serial.println(F("Awake now: "));
 #endif
   timeAfter = millis();
 #if defined(TXDEBUG)
-  Serial.print(F("timeAfterSleep="));
-  Serial.println(timeAfter);
-  Serial.print(F("SleepTime = "));
-  Serial.println(timeAfter - timeBefore);
-  Serial.print(F("Millis Time: "));
+  Serial.print(F("Current Sensor UpTime: "));
 #endif
   long time;
   time = millis();
 #if defined(TXDEBUG)
   //prints time since program started
   Serial.println(time / 1000.0);
-  Serial.print(F("2nd wakeState="));
-  Serial.println(wakeState);
+  Serial.print(F("Free RAM : "));
+  Serial.println(FreeRam());
 #endif
   // Pat the WatchDog
   ResetWatchdog();
+}
+
+/** Returns the number of bytes currently free in RAM. */
+static int FreeRam(void) {
+  extern int  __bss_end;
+  extern int* __brkval;
+  int free_memory;
+  if (reinterpret_cast<int>(__brkval) == 0) {
+    // if no heap use from end of bss section
+    free_memory = reinterpret_cast<int>(&free_memory)
+                  - reinterpret_cast<int>(&__bss_end);
+  } else {
+    // use from top of stack to heap
+    free_memory = reinterpret_cast<int>(&free_memory)
+                  - reinterpret_cast<int>(__brkval);
+  }
+  return free_memory;
 }
